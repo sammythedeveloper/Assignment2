@@ -1,198 +1,72 @@
-using System;
+// // =====================================================================
+// //  MyBudget — Assignment 3 entry point (composition root).
+// //
+// //  >>> YOU WRITE THE DEPENDENCY-INJECTION WIRING HERE (Module 8). <<<
+// //
+// //  The ConsoleApp UI is provided and depends only on the service
+// //  abstractions. Register your implementations with the container so that
+// //  ConsoleApp can be resolved. See the "Build specification" in the brief.
+// // =====================================================================
+// using Microsoft.Extensions.DependencyInjection;
+// using Microsoft.Extensions.Hosting;
+// using MyBudget.App;
+// using MyBudget.Core;
+// using MyBudget.Data;
+
+// var builder = Host.CreateApplicationBuilder(args);
+
+// string dataPath = Path.Combine(AppContext.BaseDirectory, "expenses.json");
+
+// // TODO (Module 8): register your services against their interfaces so the
+// // container can construct ConsoleApp. You will need, for example:
+// //   - IExpenseStore       -> JsonExpenseStore(dataPath)
+// //   - IExpenseRepository  -> ExpenseRepository
+// //   - IBudgetService      -> BudgetService
+// //   - ConsoleApp          (the UI, so it can be resolved below)
+// // Choose appropriate service lifetimes (singleton / scoped / transient).
+
+// using IHost host = builder.Build();
+
+// host.Services.GetRequiredService<ConsoleApp>().Run();
+
+using System.IO;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using MyBudget.Core;
+using MyBudget.Data;
 
-// --- State Variables (Primitive Types - Module 1) ---
-decimal totalSpent = 0m;
-int expenseCount = 0;
-decimal highestExpense = 0m;
+namespace MyBudget.App;
 
-decimal foodTotal = 0m;
-decimal transportTotal = 0m;
-decimal utilitiesTotal = 0m;
-decimal entertainmentTotal = 0m;
-decimal otherTotal = 0m;
-
-decimal monthlyBudget = 0m;
-bool isBudgetSet = false;
-
-// Requirement 3: Raw string literal banner block
-string banner = """
-============================================================
-  MyBudget Expense Tracker
-============================================================
-""";
-Console.WriteLine(banner);
-
-bool running = true;
-
-// Requirement 4: Menu loop driven by a switch statement
-while (running)
+public class Program
 {
-    Console.WriteLine("\n1) Add an expense   2) View summary   3) Set monthly budget   4) Exit");
-    Console.Write("> ");
-    string? choice = Console.ReadLine();
-
-    switch (choice)
+    public static void Main(string[] args)
     {
-        case "1":
-            ExecuteAddExpense();
-            break;
-        case "2":
-            ExecuteViewSummary();
-            break;
-        case "3":
-            ExecuteSetBudget();
-            break;
-        case "4":
-            running = false;
-            Console.WriteLine("Thank you for using MyBudget. Goodbye!");
-            break;
-        default:
-            Console.WriteLine("Invalid option. Please select 1-4.");
-            break;
-    }
-}
-
-// --- Menu Command Functions ---
-
-void ExecuteAddExpense()
-{
-    // 1. Description tracking
-    string description = "";
-    while (string.IsNullOrWhiteSpace(description))
-    {
-        Console.Write("Description : ");
-        description = Console.ReadLine() ?? "";
-        if (string.IsNullOrWhiteSpace(description))
-            Console.WriteLine("  Description cannot be empty.");
-    }
-
-    // 2. Requirement 9 & 11: Amount Input tracking with TryParse + try/catch loop
-    decimal amount = 0m;
-    while (true)
-    {
-        Console.Write("Amount      : ");
-        if (decimal.TryParse(Console.ReadLine(), out decimal inputVal))
-        {
-            try
+        var host = Host.CreateDefaultBuilder(args)
+            .ConfigureServices((context, services) =>
             {
-                amount = BudgetRules.ValidateAmount(inputVal);
-                break;
-            }
-            catch (InvalidExpenseException ex)
-            {
-                Console.WriteLine($"  {ex.Message}");
-            }
-        }
-        else
-        {
-            Console.WriteLine("  Invalid numeric quantity format.");
-        }
-    }
+                // Establish the storage target path 
+                string dataPath = Path.Combine(Directory.GetCurrentDirectory(), "expenses.json");
 
-    // 3. Category Tracking
-    string? category = null;
-    while (category == null)
-    {
-        Console.Write("Category    : [Food/Transport/Utilities/Entertainment/Other] ");
-        category = BudgetRules.NormalizeCategory(Console.ReadLine());
-        if (category == null)
-            Console.WriteLine("  Invalid category selected.");
-    }
+                // --- SERVICE LIFETIME SELECTIONS & REASONINGS ---
+                
+                // JsonExpenseStore holds static path configurations but no dynamic application states.
+                // It can safely live as a Singleton to minimize memory overhead.
+                services.AddSingleton<IExpenseStore>(new JsonExpenseStore(dataPath));
 
-    // 4. Date Tracking
-    DateOnly targetDate;
-    while (true)
-    {
-        Console.Write("Date (blank = today): ");
-        string? dateStr = Console.ReadLine();
-        if (string.IsNullOrWhiteSpace(dateStr))
-        {
-            targetDate = DateOnly.FromDateTime(DateTime.Today);
-            break;
-        }
-        if (DateOnly.TryParse(dateStr, out DateOnly parsedDate))
-        {
-            if (parsedDate > DateOnly.FromDateTime(DateTime.Today))
-                Console.WriteLine("  Future dates are rejected.");
-            else
-            {
-                targetDate = parsedDate;
-                break;
-            }
-        }
-        else
-        {
-            Console.WriteLine("  Invalid format. Please use yyyy-mm-dd.");
-        }
-    }
+                // ExpenseRepository manages our active list state collection throughout runtime.
+                // In a single-user console session, a Singleton ensures data remains intact between actions.
+                services.AddSingleton<IExpenseRepository, ExpenseRepository>();
 
-    // Requirement 12: Handle optional note via Nullable syntax and ??
-    Console.Write("Note (optional): ");
-    string? rawNote = Console.ReadLine();
-    string finalNote = string.IsNullOrWhiteSpace(rawNote) ? "None" : rawNote;
+                // BudgetService preserves memory flags representing limits set via user interaction.
+                // Storing this as a Singleton maintains state visibility across menu commands.
+                services.AddSingleton<IBudgetService, BudgetService>();
 
-    // Update running statistics metrics state values safely
-    totalSpent += amount;
-    expenseCount++;
-    if (amount > highestExpense) highestExpense = amount;
+                // Transient ensures a fresh instance of the application layer is spawned on initiation.
+                services.AddTransient<ConsoleApp>();
+            })
+            .Build();
 
-    switch (category)
-    {
-        case "Food": foodTotal += amount; break;
-        case "Transport": transportTotal += amount; break;
-        case "Utilities": utilitiesTotal += amount; break;
-        case "Entertainment": entertainmentTotal += amount; break;
-        default: otherTotal += amount; break;
-    }
-
-    string sizeBand = BudgetRules.ClassifyAmount(amount);
-    Console.WriteLine($"  Recorded: {BudgetRules.FormatCurrency(amount)} | {category} | {targetDate:yyyy-MM-dd}");
-    Console.WriteLine($"    Size band : {sizeBand}");
-
-    if (isBudgetSet)
-    {
-        decimal remaining = monthlyBudget - totalSpent;
-        string status = BudgetRules.BudgetStatus(remaining, monthlyBudget);
-        Console.WriteLine($"  Budget: {BudgetRules.FormatCurrency(remaining)} remaining of {BudgetRules.FormatCurrency(monthlyBudget)} -> {status}");
-    }
-}
-
-void ExecuteViewSummary()
-{
-    Console.WriteLine("\n--- Summary Report ---");
-    if (expenseCount == 0)
-    {
-        Console.WriteLine("No expenses recorded yet.");
-        return;
-    }
-
-    decimal average = totalSpent / expenseCount;
-
-    Console.WriteLine($"Count         : {expenseCount}");
-    Console.WriteLine($"Total Spent   : {BudgetRules.FormatCurrency(totalSpent)}");
-    Console.WriteLine($"Average Spent : {BudgetRules.FormatCurrency(average)}");
-    Console.WriteLine($"Highest Single: {BudgetRules.FormatCurrency(highestExpense)}");
-    Console.WriteLine("\nCategory Breakdown:");
-    Console.WriteLine($"  Food         : {BudgetRules.FormatCurrency(foodTotal)}");
-    Console.WriteLine($"  Transport    : {BudgetRules.FormatCurrency(transportTotal)}");
-    Console.WriteLine($"  Utilities    : {BudgetRules.FormatCurrency(utilitiesTotal)}");
-    Console.WriteLine($"  Entertainment: {BudgetRules.FormatCurrency(entertainmentTotal)}");
-    Console.WriteLine($"  Other        : {BudgetRules.FormatCurrency(otherTotal)}");
-}
-
-void ExecuteSetBudget()
-{
-    while (true)
-    {
-        Console.Write("Monthly budget: ");
-        if (decimal.TryParse(Console.ReadLine(), out decimal parsedBudget) && parsedBudget > 0)
-        {
-            monthlyBudget = parsedBudget;
-            isBudgetSet = true;
-            Console.WriteLine($"Budget set to {BudgetRules.FormatCurrency(monthlyBudget)}.");
-            break;
-        }
-        Console.WriteLine("  Please provide a positive numerical value.");
+        var app = host.Services.GetRequiredService<ConsoleApp>();
+        app.Run();
     }
 }
